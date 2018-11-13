@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+textarea {
+  width: 640px;
+}
+</style>
+<script src="treeDfs.js"></script>
+<script id="js_code">
+function Node(value) {
+  this.value = value;
+  this.children = [];
+}
+function jsTraverse(node) {
+  var sum = node.value;
+  for(var i = 0, il = node.children.length; i < il; i++) {
+    sum += jsTraverse(node.children[i]);
+  }
+  return sum;
+}
+</script>
+<script id="ws_instantiate_code">
+var module, functions = {};
+setTimeout(function () {
+  module = Module;
+  functions.traverse =
+    module.cwrap('traverse',
+                 'number',
+                 ['number']);
+  functions.traverseThread = 
+    module.cwrap('traverseThread',
+                 'number',
+                 ['number']);
+  functions.sizeofNode = 
+    module.cwrap('sizeofNode',
+                 'number',
+                 []);
+  functions.NodeInit =
+    module.cwrap('NodeInit',
+                 'number',
+                 ['number', 'number']);
+  functions.NodeDelete =
+    module.cwrap('NodeDelete',
+                 'number',
+                 []);
+  functions.NodeAdd =
+    module.cwrap('NodeAdd',
+                 'number',
+                 ['number', 'number']);
+  onReady();
+}, 1000);
+</script>
+<script id="test_code">
+function start() {
+  document.getElementById('run_button').disabled = true;
+
+  var graphDepth = 10;
+  var graphWidth = 5;
+  var loop = 10;
+
+  var root;
+  var nodeNum = 0;
+
+  var jsPerformance = document.getElementById('js_performance');
+  var wsPerformance = document.getElementById('ws_performance');
+  var wsThreadPerformance = document.getElementById('ws_thread_performance');
+  var comparison = document.getElementById('comparison');
+  var comparisonThread = document.getElementById('comparison_thread');
+
+  jsPerformance.innerText = '';
+  wsPerformance.innerText = '';
+  wsThreadPerformance.innerText = '';
+  comparison.innerText = '';
+  comparisonThread.innerText = '';
+
+  createGraph();
+  console.log('node#', nodeNum);
+
+  function createGraph() {
+    function createNode(value) {
+      var node = new Node(value);
+      node.pointer = Module._malloc(functions.sizeofNode())
+      functions.NodeInit(node.pointer, value);
+      nodeNum++;
+      //console.log('malloc:', node.pointer);
+      return node;
+    }
+
+    function addChild(parent, child) {
+      parent.children.push(child);
+      functions.NodeAdd(parent.pointer, child.pointer);
+    }
+
+    function addChildren(parent, depth) {
+      if(depth > graphDepth) return;
+      for(var i = 0; i < graphWidth; i++) {
+        var child = createNode(depth);
+        addChild(parent, child);
+        addChildren(child, depth + 1);
+      }
+    }
+
+    root = createNode(1);
+    var left = createNode(2);
+    addChild(root, left);
+    addChildren(left, 3);
+    var right = createNode(2);
+    addChild(root, right);
+    addChildren(right, 3);
+  }
+
+  function freeGraph(node) {
+    functions.NodeDelete(node.pointer);
+    Module._free(node.pointer);
+    //console.log('free:', node.pointer);
+    for(var i = 0, il = node.children.length; i < il; i++) {
+      freeGraph(node.children[i]);
+    }
+  }
+
+  function checkFunctionality(node) {
+    var jsResult = jsTraverse(node);
+    var wasmResult = functions.traverse(node.pointer);
+    var wasmThreadResult = functions.traverseThread(node.pointer);
+    return jsResult === wasmResult && jsResult === wasmThreadResult;
+  }
+
+  function run(func, node, loop) {
+    func(node); // warm-up
+    var startTime = performance.now();
+    for (var i = 0; i < loop; i++) {
+      func(node);
+    }
+    var endTime = performance.now();
+    return ((endTime - startTime) / loop).toFixed(4);
+  }
+
+  // don't use Promise for the non Promise support browsers so far.
+  setTimeout(function () {
+    if (! checkFunctionality(root)) {
+      document.getElementById('message').innerText =
+       'Three functions seem not equeal';
+      document.getElementById('run_button').disabled = false;
+      freeGraph(root);
+      return;
+    }
+    setTimeout(function () {
+      jsPerformance.innerText = run(jsTraverse, root, loop);
+      setTimeout(function () {
+        wsPerformance.innerText = run(functions.traverse, root.pointer, loop);
+        setTimeout(function () {
+          wsThreadPerformance.innerText = run(functions.traverseThread, root.pointer, loop);
+          comparison.innerText =
+            (Number(jsPerformance.innerText) /
+               Number(wsPerformance.innerText)).toFixed(4);
+          comparisonThread.innerText =
+            (Number(jsPerformance.innerText) /
+               Number(wsThreadPerformance.innerText)).toFixed(4);
+          document.getElementById('message').innerText = 'Done';
+          document.getElementById('run_button').disabled = false;
+          freeGraph(root);
+        });
+        document.getElementById('message').innerText = 'Running WebAssembly Thread';
+      });
+      document.getElementById('message').innerText = 'Running WebAssembly';
+    });
+    document.getElementById('message').innerText = 'Running JavaScript';
+  });
+
+  document.getElementById('message').innerText = 'Checking equality';
+}
+</script>
+<script>
+function onReady() {
+  document.getElementById('run_button').disabled = false;
+  document.getElementById('message').innerText = 'Ready';
+}
+
+function init() {
+  putCode('test_code_area', document.getElementById('test_code').text.trim());
+  putCode('js_code_area', document.getElementById('js_code').text.trim());
+
+  loadTextFile('treeDfs.cpp', function(text) {
+    putCode('ws_code_area', text.trim());
+  });
+
+  loadTextFile('treeDfs.sh', function(text) {
+    putCode('sh_code_area', text.trim());
+  });
+
+  putCode('ws_instantiate_code_area',
+          document.getElementById('ws_instantiate_code').text.trim());
+}
+
+function loadTextFile(url, callback) {
+  var request = new XMLHttpRequest();
+  request.open('GET', url);
+  request.responseType = 'text';
+  request.onload = function (event) {
+    callback(request.response);
+  };
+  request.send();
+}
+
+function putCode(textareaId, code) {
+  var textarea = document.getElementById(textareaId);
+  textarea.value = code;
+  textarea.setAttribute('rows', code.split('\n').length);
+}
+
+function switchDisplay(div) {
+  var textarea = div.getElementsByTagName('textarea')[0];
+  var p = div.getElementsByTagName('p')[0];
+  p.textContent = p.textContent.slice(2);
+  if (textarea.style.display === 'none') {
+    textarea.style.display = '';
+    p.textContent = '- ' + p.textContent;
+  } else {
+    textarea.style.display = 'none';
+    p.textContent = '+ ' + p.textContent;
+  }
+}
+</script>
+</head>
+<body onload="init()">
+  <div>
+    <p>
+      <button id="run_button" onclick="start()" disabled>run</button><br />
+      <span id="message">Loading WebAssembly</span>
+    </p>
+    <p>
+      Result (average [ms])<br />
+      JavaScript: <span id="js_performance"></span><br />
+      WebAssembly: <span id="ws_performance"></span><br />
+      WebAssembly Thread: <span id="ws_thread_performance"></span><br />
+      JavaScript/WebAssembly: <span id="comparison"></span><br />
+      JavaScript/WebAssembly Thread: <span id="comparison_thread"></span><br />
+    </p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">+ Test code</p>
+    <p><textarea id="test_code_area" readonly style="display:none"></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">- JavaScript code</p>
+    <p><textarea id="js_code_area" readonly></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">- WebAssembly C code</p>
+    <p><textarea id="ws_code_area" readonly></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">+ WebAssembly Compile shell script</p>
+    <p><textarea id="sh_code_area" readonly style="display:none"></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">+ WebAssembly Instantiation code</p>
+    <p><textarea id="ws_instantiate_code_area" readonly style="display:none"></textarea></p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+textarea {
+  width: 640px;
+}
+</style>
+<script src="multiplyDoubleVec.js"></script>
+<script id="js_code">
+function jsMultiplyDoubleVec(src1, src2, res, n) {
+  for (var i = 0; i < n; i++) {
+    res[i] = src1[i] * src2[i];
+  }
+}
+</script>
+<script id="ws_instantiate_code">
+var module, functions = {};
+setTimeout(function() {
+  module = Module;
+  functions.multiplyDoubleVec =
+    module.cwrap('multiplyDoubleVec',
+                 null,
+                 ['number', 'number', 'number', 'number']);
+  functions.multiplyDoubleVecThread =
+    module.cwrap('multiplyDoubleVecThread',
+                 null,
+                 ['number', 'number', 'number', 'number']);
+  onReady();
+}, 1000);
+</script>
+<script id="test_code">
+function start() {
+  document.getElementById('run_button').disabled = true;
+  document.getElementById('transfer').disabled = true;
+
+  var num = 0x2000000;
+  var loop = 10;
+  var transferData = false;
+
+  var jsPerformance = document.getElementById('js_performance');
+  var wsPerformance = document.getElementById('ws_performance');
+  var wsThreadPerformance = document.getElementById('ws_thread_performance');
+  var comparison = document.getElementById('comparison');
+  var comparisonThread = document.getElementById('comparison_thread');
+
+  jsPerformance.innerText = '';
+  wsPerformance.innerText = '';
+  wsThreadPerformance.innerText = '';
+  comparison.innerText = '';
+  comparisonThread.innerText = '';
+
+  var src1 = new Float64Array(num);
+  var src2 = new Float64Array(num);
+
+  var res1 = new Float64Array(num); // for JavaScript
+  var res2 = new Float64Array(num); // for WebAssembly
+  var res3 = new Float64Array(num); // for WebAssembly Thread
+
+  var pointer1 = null;
+  var pointer2 = null;
+  var pointer3 = null;
+  var offset1 = null;
+  var offset2 = null;
+  var offset3 = null;
+
+  initArray(src1);
+  initArray(src2);
+
+  function initArray(array) {
+    for (var i = 0, il = array.length; i < il; i++) {
+      array[i] = Math.random() * 20000 - 10000;
+    }
+  }
+
+  function equalArray(array1, array2) {
+    if (array1.length !== array2.length) return false;
+    for (var i = 0, il = array1.length; i < il; i++) {
+      if (array1[i] !== array2[i])
+        return false;
+    }
+    return true;
+  }
+
+  function checkFunctionality() {
+    jsMultiplyDoubleVec(src1, src2, res1, src1.length);
+    wsMultiplyDoubleVec(src1, src2, res2, src1.length, true);
+    wsThreadMultiplyDoubleVec(src1, src2, res3, src1.length, true);
+    return equalArray(res1, res2) && equalArray(res1, res3);
+  }
+
+  function run(func, src1, src2, res, loop) {
+    func(src1, src2, res, src1.length, transferData);
+    var elapsedTime = 0.0;
+    for (var i = 0; i < loop; i++) {
+      var startTime = performance.now();
+      func(src1, src2, res, src1.length, transferData);
+      var endTime = performance.now();
+      elapsedTime += (endTime - startTime);
+    }
+    return (elapsedTime / loop).toFixed(4);
+  }
+
+  function malloc() {
+    pointer1 = module._malloc(num * 8);
+    pointer2 = module._malloc(num * 8);
+    pointer3 = module._malloc(num * 8);
+    offset1 = pointer1 / 8;
+    offset2 = pointer2 / 8;
+    offset3 = pointer3 / 8;
+  }
+
+  function free() {
+    module._free(pointer1);
+    module._free(pointer2);
+    module._free(pointer3);
+    pointer1 = null;
+    pointer2 = null;
+    pointer3 = null;
+    offset1 = null;
+    offset2 = null;
+    offset3 = null;
+  }
+
+  function wsMultiplyDoubleVec(src1, src2, res, n, transfer) {
+    if(transfer) {
+      malloc();
+      module.HEAPF64.set(src1, offset1);
+      module.HEAPF64.set(src2, offset2);
+    }
+    functions.multiplyDoubleVec(pointer1, pointer2, pointer3, n);
+    if(transfer) {
+      res.set(module.HEAPF64.subarray(offset3, offset3 + n));
+      free();
+    }
+  }
+
+  function wsThreadMultiplyDoubleVec(src1, src2, res, n, transfer) {
+    if(transfer) {
+      malloc();
+      module.HEAPF64.set(src1, offset1);
+      module.HEAPF64.set(src2, offset2);
+    }
+    functions.multiplyDoubleVecThread(pointer1, pointer2, pointer3, n);
+    if(transfer) {
+      res.set(module.HEAPF64.subarray(offset3, offset3 + n));
+      free();
+    }
+  }
+
+  // don't use Promise for the non Promise support browsers so far.
+  setTimeout(function () {
+    if (! checkFunctionality()) {
+      document.getElementById('message').innerText =
+       'Three functions seem not equeal';
+      document.getElementById('run_button').disabled = false;
+      document.getElementById('transfer').disabled = false;
+      return;
+    }
+    setTimeout(function () {
+      jsPerformance.innerText = run(jsMultiplyDoubleVec, src1, src2, res1, loop);
+      setTimeout(function () {
+        if(! transferData) {
+          malloc();
+        }
+        wsPerformance.innerText = run(wsMultiplyDoubleVec, src1, src2, res2, loop);
+        setTimeout(function () {
+          wsThreadPerformance.innerText = run(wsThreadMultiplyDoubleVec, src1, src2, res2, loop);
+          if(! transferData) {
+            free();
+          }
+          comparison.innerText =
+            (Number(jsPerformance.innerText) /
+               Number(wsPerformance.innerText)).toFixed(4);
+          comparisonThread.innerText =
+            (Number(jsPerformance.innerText) /
+               Number(wsThreadPerformance.innerText)).toFixed(4);
+          document.getElementById('message').innerText = 'Done';
+          document.getElementById('run_button').disabled = false;
+          document.getElementById('transfer').disabled = false;
+        });
+        document.getElementById('message').innerText = 'Running WebAssembly Thread';
+      });
+      document.getElementById('message').innerText = 'Running WebAssembly';
+    });
+    document.getElementById('message').innerText = 'Running JavaScript';
+  });
+
+  document.getElementById('message').innerText = 'Checking equality';
+}
+</script>
+<script>
+function onReady() {
+  document.getElementById('run_button').disabled = false;
+  document.getElementById('transfer').disabled = false;
+  document.getElementById('message').innerText = 'Ready';
+}
+
+function init() {
+  putCode('test_code_area', document.getElementById('test_code').text.trim());
+  putCode('js_code_area', document.getElementById('js_code').text.trim());
+
+  loadTextFile('multiplyDoubleVec.c', function(text) {
+    putCode('ws_code_area', text.trim());
+  });
+
+  loadTextFile('multiplyDoubleVec.sh', function(text) {
+    putCode('sh_code_area', text.trim());
+  });
+
+  putCode('ws_instantiate_code_area',
+          document.getElementById('ws_instantiate_code').text.trim());
+}
+
+function loadTextFile(url, callback) {
+  var request = new XMLHttpRequest();
+  request.open('GET', url);
+  request.responseType = 'text';
+  request.onload = function (event) {
+    callback(request.response);
+  };
+  request.send();
+}
+
+function putCode(textareaId, code) {
+  var textarea = document.getElementById(textareaId);
+  textarea.value = code;
+  textarea.setAttribute('rows', code.split('\n').length);
+}
+
+function switchDisplay(div) {
+  var textarea = div.getElementsByTagName('textarea')[0];
+  var p = div.getElementsByTagName('p')[0];
+  p.textContent = p.textContent.slice(2);
+  if (textarea.style.display === 'none') {
+    textarea.style.display = '';
+    p.textContent = '- ' + p.textContent;
+  } else {
+    textarea.style.display = 'none';
+    p.textContent = '+ ' + p.textContent;
+  }
+}
+
+function onCheckboxChange(input) {
+  transferData = input.checked;
+}
+</script>
+</head>
+<body onload="init()">
+  <div>
+    <p>
+      <button id="run_button" onclick="start()" disabled>run</button>
+      <input id="transfer" type="checkbox" onchange="onCheckboxChange(this)"> transfer data<br />
+      <span id="message">Loading WebAssembly</span>
+    </p>
+    <p>
+      Result (average [ms])<br />
+      JavaScript: <span id="js_performance"></span><br />
+      WebAssembly: <span id="ws_performance"></span><br />
+      WebAssembly Thread: <span id="ws_thread_performance"></span><br />
+      JavaScript/WebAssembly: <span id="comparison"></span><br />
+      JavaScript/WebAssembly Thread: <span id="comparison_thread"></span><br />
+    </p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">+ Test code</p>
+    <p><textarea id="test_code_area" readonly style="display:none"></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">- JavaScript code</p>
+    <p><textarea id="js_code_area" readonly></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">- WebAssembly C code</p>
+    <p><textarea id="ws_code_area" readonly></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">+ WebAssembly Compile shell script</p>
+    <p><textarea id="sh_code_area" readonly style="display:none"></textarea></p>
+  </div>
+  <div>
+    <p onclick="switchDisplay(this.parentNode)">+ WebAssembly Instantiation code</p>
+    <p><textarea id="ws_instantiate_code_area" readonly style="display:none"></textarea></p>
+  </div>
+</body>
+</html>
