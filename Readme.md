@@ -4,7 +4,7 @@ Easy JavaScript vs WebAssembly Thread performance comparison test-set.
 
 ## Demo
 
-[Online Demo](https://takahirox.github.io/WebAssemblyThread-benchmark)
+[Online Demo](https://raw.githack.com/takahirox/WebAssemblyThread-benchmark/master/index.html)
 
 ## Develop locally
 
